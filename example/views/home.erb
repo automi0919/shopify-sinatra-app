@@ -2,10 +2,23 @@
 <p>Welcome!</p>
 
 <h3>Products</h3>
-<ul>
-  <% @products.each do |product| %>
-    <li><a href=<%="https://#{@shop.myshopify_domain}/admin/products/#{product.id}"%> target="_blank"> <%= product.id %> </a></li>
-  <% end %>
-</ul>
 
-<a href="/logout">Logout</a>
+<% if @products && @products.any? %>
+  <ul>
+    <% @products.each do |product| %>
+      <li>
+        <a href="https://<%= @shop.myshopify_domain %>/admin/products/<%= product.id %>" 
+           target="_blank" 
+           rel="noopener">
+          <%= product.title || product.id %>
+        </a>
+      </li>
+    <% end %>
+  </ul>
+<% else %>
+  <p>No products found.</p>
+<% end %>
+
+<p>
+  <a href="/logout">Logout</a>
+</p>
