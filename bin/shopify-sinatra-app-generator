@@ -1,5 +1,8 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
+
 require 'fileutils'
+require 'open3'
 
 class Generator
   attr_reader :spec, :app_dir, :example_dir
@@ -7,18 +10,24 @@ class Generator
   def initialize(app_name)
     @spec = Gem::Specification.find_by_name('shopify-sinatra-app')
     gem_root = spec.gem_dir
-    @example_dir = gem_root + '/example'
+    @example_dir = File.join(gem_root, 'example')
 
     working_dir = Dir.pwd
-    @app_dir = working_dir + '/' + app_name
+    @app_dir = File.join(working_dir, app_name.to_s.strip)
 
     log "Generating new app: #{app_name}"
     log "fullpath: #{app_dir}"
   end
 
   def run
-    if Dir.exists? app_dir
-      log 'App directory alread exists, pick a new app name or delete the existing folder'
+    if Dir.exist?(app_dir)
+      log "App directory already exists: #{app_dir}"
+      log "Pick a new app name or delete the existing folder."
+      return
+    end
+
+    unless Dir.exist?(example_dir)
+      log "Example directory not found: #{example_dir}"
       return
     end
 
@@ -36,36 +45,59 @@ class Generator
   end
 
   def create_dot_env
-    FileUtils.touch(app_dir + '/.env')
-    file = File.open(app_dir + '/.env', 'w')
-    file.write("SHOPIFY_API_KEY=your_api_key\n")
-    file.write("SHOPIFY_SHARED_SECRET=your_shared_secret\n")
-    file.write("SECRET=random_string_to_encrypt_credentials_with\n")
-    file.close
+    env_path = File.join(app_dir, '.env')
+
+    # Don't overwrite if it already exists (safer for re-runs)
+    if File.exist?(env_path)
+      log ".env already exists, skipping: #{env_path}"
+      return
+    end
+
+    contents = <<~ENVFILE
+      SHOPIFY_API_KEY=your_api_key
+      SHOPIFY_SHARED_SECRET=your_shared_secret
+      SECRET=random_string_to_encrypt_credentials_with
+    ENVFILE
+
+    File.write(env_path, contents)
   end
 
   def sub_latest_version
-    file_name = "#{app_dir}/Gemfile"
+    file_name = File.join(app_dir, 'Gemfile')
+    unless File.exist?(file_name)
+      log "Gemfile not found: #{file_name}"
+      return
+    end
+
     text = File.read(file_name)
-    new_contents = text.gsub("gem 'shopify-sinatra-app', path: '../'", "gem 'shopify-sinatra-app', '~> #{spec.version}'")
-    File.open(file_name, "w") {|file| file.puts new_contents }
+
+    # Replace local path reference with current gem version constraint
+    new_contents = text.gsub(
+      "gem 'shopify-sinatra-app', path: '../'",
+      "gem 'shopify-sinatra-app', '~> #{spec.version}'"
+    )
+
+    File.write(file_name, new_contents)
   end
 
   def bundle_install
-    Dir.chdir(app_dir)
-
-    pipe = IO.popen('bundle install')
-    while (line = pipe.gets)
-      print line
+    Dir.chdir(app_dir) do
+      run_cmd('bundle install')
     end
   end
 
   def migrate_database
-    Dir.chdir(app_dir)
+    Dir.chdir(app_dir) do
+      run_cmd('bundle exec rake db:migrate')
+    end
+  end
 
-    pipe = IO.popen('bundle exec rake db:migrate')
-    while (line = pipe.gets)
-      print line
+  def run_cmd(cmd)
+    log "→ #{cmd}"
+    Open3.popen2e(cmd) do |_stdin, stdout_err, wait_thr|
+      stdout_err.each { |line| print line }
+      status = wait_thr.value
+      raise "Command failed (#{status.exitstatus}): #{cmd}" unless status.success?
     end
   end
 
@@ -74,9 +106,10 @@ class Generator
   end
 end
 
-if ARGV.length < 2
+if ARGV.length < 2 || ARGV[0] != 'new'
   puts "Usage:\nshopify-sinatra-app-generator new <app_name>"
-else
-  app_name = ARGV[1]
-  Generator.new(app_name).run
+  exit 1
 end
+
+app_name = ARGV[1]
+Generator.new(app_name).run
