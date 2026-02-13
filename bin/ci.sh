@@ -2,8 +2,6 @@
 
 set -euo pipefail
 
-echo "🚀 Starting setup..."
-
 if [ ! -d "example" ]; then
   echo "❌ 'example' directory not found."
   exit 1
