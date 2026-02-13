@@ -2,11 +2,16 @@ development:
   adapter: sqlite3
   database: db/development.sqlite3
   pool: 5
-
-production:
-  url: <%= ENV['DATABASE_URL'] %>
+  timeout: 5000
 
 test:
   adapter: sqlite3
-  database: "db/test.sqlite3"
+  database: db/test.sqlite3
   pool: 8
+  timeout: 5000
+
+production:
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("DB_POOL", 5) %>
+  url: <%= ENV['DATABASE_URL'] %>
