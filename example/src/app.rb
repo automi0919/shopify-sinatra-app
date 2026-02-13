@@ -5,50 +5,45 @@ class SinatraApp < Sinatra::Base
   register Sinatra::Shopify
   register Sinatra::Flash
 
-  # set the scope that your app needs, read more here:
-  # http://docs.shopify.com/api/tutorials/oauth
-  set :scope, 'read_products, read_orders'
+  # Configure via ENV so you can change without code deploy
+  set :scope, ENV.fetch('SHOPIFY_SCOPE', 'read_products, read_orders')
 
-  # Your App's Home page
-  # this is a simple example that fetches some products
-  # from Shopify and displays them inside your app
+  # Home page: fetch shop + top 10 products
   get '/' do
-    shopify_session do |shop_name|
+    shopify_session do |_shop_name|
       @shop = ShopifyAPI::Shop.current
       @products = ShopifyAPI::Product.find(:all, params: { limit: 10 })
       erb :home
     end
+  rescue ActiveResource::ResourceNotFound, ActiveResource::ClientError => e
+    flash[:error] = "Shopify API error: #{e.message}"
+    erb :home
   end
 
-  # this endpoint recieves the uninstall webhook
-  # and cleans up data, add to this endpoint as your app
-  # stores more data.
-  shopify_webhook '/uninstall' do |shop_name, params|
-    Shop.find_by(name: shop_name).destroy
+  # Uninstall webhook: clean up persisted shop data
+  shopify_webhook '/uninstall' do |shop_name, _payload|
+    Shop.find_by(name: shop_name)&.destroy
   end
 
   private
 
-  # This method gets called when your app is installed.
-  # setup any webhooks or services you need on Shopify
-  # inside here.
+  # Runs after successful install/auth.
+  # Best practice: register uninstall webhook automatically.
   def after_shopify_auth
-    # shopify_session do
-      # create an uninstall webhook, this webhook gets sent
-      # when your app is uninstalled from a shop. It is good
-      # practice to clean up any data from a shop when they
-      # uninstall your app:
+    shopify_session do |_shop_name|
+      webhook = ShopifyAPI::Webhook.new(
+        topic: 'app/uninstalled',
+        address: "#{base_url}/uninstall",
+        format: 'json'
+      )
 
-      # uninstall_webhook = ShopifyAPI::Webhook.new(
-      #   topic: 'app/uninstalled',
-      #   address: "#{base_url}/uninstall",
-      #   format: 'json'
-      # )
-      # begin
-      #   uninstall_webhook.save!
-      # rescue => e
-      #   raise unless uninstall_webhook.persisted?
-      # end
-    # end
+      begin
+        webhook.save!
+      rescue => e
+        # If webhook already exists, Shopify may respond with an error
+        # and the record may still be persisted. Only raise if not persisted.
+        raise e unless webhook.persisted?
+      end
+    end
   end
 end
