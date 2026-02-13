@@ -70,17 +70,21 @@ module Sinatra
       end
 
       def clear_session
-        session.delete(:shopify)
         session.clear
       end
 
       def activate_shopify_api(shop_name, token)
-        api_session = ShopifyAPI::Session.new(domain: shop_name, token: token, api_version: settings.api_version)
+        api_session = ShopifyAPI::Session.new(
+          domain: shop_name,
+          token: token,
+          api_version: settings.api_version
+        )
         ShopifyAPI::Base.activate_session(api_session)
       end
 
       def receive_webhook(&blk)
         return unless verify_shopify_webhook
+
         shop_name = request.env['HTTP_X_SHOPIFY_SHOP_DOMAIN']
         webhook_body = ActiveSupport::JSON.decode(request.body.read.to_s)
         yield shop_name, webhook_body
@@ -89,35 +93,41 @@ module Sinatra
 
       def sanitized_shop_param(params)
         return unless params[:shop].present?
-        name = params[:shop].to_s.strip
+
+        name = params[:shop].to_s.strip.downcase
         name += '.myshopify.com' if !name.include?('myshopify.com') && !name.include?('.')
         name.gsub!('https://', '')
         name.gsub!('http://', '')
+        name.gsub!(/\/+\z/, '') # strip trailing slashes
 
         u = URI("http://#{name}")
-        u.host.ends_with?('.myshopify.com') ? u.host : nil
+        u.host&.ends_with?('.myshopify.com') ? u.host : nil
+      rescue URI::InvalidURIError
+        nil
       end
 
       def verify_shopify_webhook
         data = request.body.read.to_s
-        digest = OpenSSL::Digest.new('sha256')
-        calculated_hmac = Base64.encode64(OpenSSL::HMAC.digest(digest, settings.shared_secret, data)).strip
         request.body.rewind
 
-        if calculated_hmac == request.env['HTTP_X_SHOPIFY_HMAC_SHA256']
-          true
-        else
-          puts 'Shopify Webhook verification failed!'
-          false
-        end
+        header_hmac = request.env['HTTP_X_SHOPIFY_HMAC_SHA256'].to_s
+        return false if header_hmac.blank?
+
+        digest = OpenSSL::Digest.new('sha256')
+        calculated_hmac = Base64.strict_encode64(
+          OpenSSL::HMAC.digest(digest, settings.shared_secret, data)
+        )
+
+        Rack::Utils.secure_compare(calculated_hmac, header_hmac)
+      rescue => e
+        warn "Shopify Webhook verification error: #{e.class}: #{e.message}"
+        false
       end
     end
 
     def shopify_webhook(route, &blk)
       settings.webhook_routes << route
-      post(route) do
-        receive_webhook(&blk)
-      end
+      post(route) { receive_webhook(&blk) }
     end
 
     def self.registered(app)
@@ -131,8 +141,9 @@ module Sinatra
       app.set :public_folder, File.expand_path('public')
       app.enable :inline_templates
 
-      app.set :api_version, '2019-07'
-      app.set :scope, 'read_products, read_orders'
+      # Prefer configuring version via env so you can upgrade without code changes
+      app.set :api_version, ENV.fetch('SHOPIFY_API_VERSION', '2019-07')
+      app.set :scope, ENV.fetch('SHOPIFY_SCOPE', 'read_products, read_orders')
 
       app.set :api_key, ENV['SHOPIFY_API_KEY']
       app.set :shared_secret, ENV['SHOPIFY_SHARED_SECRET']
@@ -144,35 +155,37 @@ module Sinatra
       # add support for put/patch/delete
       app.use Rack::MethodOverride
 
-      app.use Rack::Session::Cookie, key: 'rack.session',
-                                     path: '/',
-                                     secure: true,
-                                     same_site: 'None',
-                                     secret: app.settings.secret,
-                                     expire_after: 60 * 30 # half an hour in seconds
+      app.use Rack::Session::Cookie,
+              key: 'rack.session',
+              path: '/',
+              secure: true,
+              same_site: 'None',
+              secret: app.settings.secret,
+              expire_after: 60 * 30 # half an hour in seconds
 
       app.use Rack::Protection
       app.use Rack::Protection::AuthenticityToken, allow_if: lambda { |env|
         app.settings.webhook_routes.include?(env["PATH_INFO"])
       }
 
-      OmniAuth.config.allowed_request_methods = [:post]
+      # Allow GET for OmniAuth request phase (common for Shopify installs)
+      OmniAuth.config.allowed_request_methods = [:get, :post]
 
       app.use OmniAuth::Builder do
         provider :shopify,
-          app.settings.api_key,
-          app.settings.shared_secret,
-          scope: app.settings.scope,
-          setup: lambda { |env|
-            shop = if env['REQUEST_METHOD'] == 'POST'
-              env['rack.request.form_hash']['shop']
-            else
-              Rack::Utils.parse_query(env['QUERY_STRING'])['shop']
-            end
+                 app.settings.api_key,
+                 app.settings.shared_secret,
+                 scope: app.settings.scope,
+                 setup: lambda { |env|
+                   shop = if env['REQUEST_METHOD'] == 'POST'
+                            env['rack.request.form_hash']['shop']
+                          else
+                            Rack::Utils.parse_query(env['QUERY_STRING'])['shop']
+                          end
 
-            site_url = "https://#{shop}"
-            env['omniauth.strategy'].options[:client_options][:site] = site_url
-          }
+                   site_url = "https://#{shop}"
+                   env['omniauth.strategy'].options[:client_options][:site] = site_url
+                 }
       end
 
       ShopifyAPI::Session.setup(
@@ -231,11 +244,10 @@ class Shop < ActiveRecord::Base
   end
 
   attr_encrypted :token,
-    key: secret,
-    attribute: 'token_encrypted',
-    mode: :single_iv_and_salt,
-    algorithm: 'aes-256-cbc',
-    insecure_mode: true
+                 key: secret,
+                 attribute: 'token_encrypted',
+                 mode: :single_iv_and_salt,
+                 algorithm: 'aes-256-cbc'
 
   validates_presence_of :name
   validates_presence_of :token, on: :create
