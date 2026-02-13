@@ -1,42 +1,80 @@
-<link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" rel="stylesheet" integrity="sha256-7s5uDGW3AHqw6xtJmNNtr+OBRJUlgkNJEo78P4b0yRw= sha512-nNo+yCHEyn0smMxSswnf/OnX6/KwJuZTlNZBjauKhTK0c+zT+q5JOCx0UFhXQ6rJR9jg6Es8gPuD2uZcYDLqSw==" crossorigin="anonymous">
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Shopify Sinatra App</title>
 
-<style>
-  body {
-    background: #fff url(<%="#{base_url}/legend.gif"%>) no-repeat fixed right 130px;
-  }
+  <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css"
+        rel="stylesheet"
+        integrity="sha256-7s5uDGW3AHqw6xtJmNNtr+OBRJUlgkNJEo78P4b0yRw=
+sha512-nNo+yCHEyn0smMxSswnf/OnX6/KwJuZTlNZBjauKhTK0c+zT+q5JOCx0UFhXQ6rJR9jg6Es8gPuD2uZcYDLqSw=="
+        crossorigin="anonymous">
 
-  .form-large input {
-    font-size: 18px;
-    padding: 8px;
-    height: auto;
-    line-height: normal;
-  }
+  <style>
+    body {
+      background: #fff url("<%= base_url %>/legend.gif") no-repeat fixed right 130px;
+    }
 
-  .form-wide {
-    width: 480px;
-  }
-</style>
+    .form-large input {
+      font-size: 18px;
+      padding: 8px;
+      height: auto;
+      line-height: normal;
+    }
+
+    .form-wide {
+      width: 480px;
+    }
+
+    .btn {
+      background-color: #5c6ac4;
+      color: #fff;
+      border: none;
+    }
+
+    .btn:hover {
+      background-color: #4959bd;
+      color: #fff;
+    }
+  </style>
+</head>
 
 <body>
-  <div style="margin-top: 100px"></div>
 
-  <div class="container">
+  <div class="container" style="margin-top: 120px;">
     <h1>Shopify Sinatra App</h1>
     <h2><small>This app requires you to login to start using it.</small></h2>
   </div>
 
-  <div style="margin-top: 30px"></div>
+  <div class="container" style="margin-top: 40px;">
+    <form id="login"
+          role="form"
+          class="form-large"
+          action="/auth/shopify"
+          method="post">
 
-  <div class="container">
-    <form id="login" role="form" class="form-large" action="/auth/shopify" method="post">
-      <input type="hidden" name="authenticity_token" value="<%= env['rack.session'][:csrf] %>" />
+      <input type="hidden"
+             name="authenticity_token"
+             value="<%= session[:csrf] %>" />
+
       <div class="input-group form-wide">
-        <input class="form-control" name="shop" value="<%= params['shop'] %>" placeholder="your-shop-url.myshopify.com">
+        <input class="form-control"
+               name="shop"
+               type="text"
+               required
+               pattern=".*\.myshopify\.com"
+               value="<%= Rack::Utils.escape_html(params['shop']) %>"
+               placeholder="your-shop.myshopify.com">
+
         <span class="input-group-btn">
-          <input class="btn" type="submit" value="Login" />
+          <button class="btn btn-primary" type="submit">
+            Login
+          </button>
         </span>
       </div>
+
     </form>
   </div>
- </body>
 
+</body>
+</html>
